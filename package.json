@@ -1,0 +1,71 @@
+{
+  "name": "@ably/encrypted-channels-react-native-polyfills",
+  "version": "0.0.1",
+  "description": "A lightweight set of polyfills that enable Ably encrypted channels to work seamlessly in React Native environments.",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && npm run build:setup && npm run build:cjs && npm run build:esm && npm run build:types",
+    "build:setup": "mkdir -p dist/cjs dist/esm && echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json && echo '{\"type\":\"module\"}' > dist/esm/package.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:types": "tsc -p tsconfig.types.json",
+    "dev": "tsc -p tsconfig.esm.json --watch",
+    "test": "vitest run",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,json,md}\"",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ably/ably-encrypted-channels-react-native-polyfills.git"
+  },
+  "keywords": [
+    "ably",
+    "react-native",
+    "crypto",
+    "polyfills",
+    "encryption"
+  ],
+  "author": "Ably",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/ably/ably-encrypted-channels-react-native-polyfills/issues"
+  },
+  "homepage": "https://github.com/ably/ably-encrypted-channels-react-native-polyfills#readme",
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^9.39.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8"
+  },
+  "dependencies": {
+    "@bacons/text-decoder": "0.0.0",
+    "@react-native-module/randombytes": "^4.0.0",
+    "react-native-aes-crypto": "^3.1.0"
+  },
+  "peerDependencies": {
+    "react-native": ">=0.60.0"
+  },
+  "engines": {
+    "node": ">=20.19.4"
+  }
+}
