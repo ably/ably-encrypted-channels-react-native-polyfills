@@ -2,7 +2,29 @@
 
 A lightweight set of polyfills that enable Ably encrypted channels to work seamlessly in React Native environments.
 
+## Prerequisites
+
+This library requires the following peer dependencies to be installed in your React Native project:
+
+- `@ably/react-native-aes` - For AES encryption/decryption
+
+Install them first:
+
+```bash
+npm install @ably/react-native-aes
+```
+
+or
+
+```bash
+yarn add @ably/react-native-aes
+```
+
+For React Native 0.60+, these dependencies should auto-link. For older versions, you may need to link them manually.
+
 ## Installation
+
+After installing the prerequisites, install this package:
 
 ```bash
 npm install @ably/encrypted-channels-react-native-polyfills
