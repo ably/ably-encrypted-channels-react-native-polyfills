@@ -8,13 +8,19 @@
  * - Text encoding/decoding
  */
 import { TextDecoder } from '@bacons/text-decoder';
-import * as Aes from 'react-native-aes-crypto';
+import { NativeModules } from 'react-native';
 
 // Type definitions for Web Crypto API compatibility
 type BufferSource = ArrayBuffer | ArrayBufferView;
-type KeyUsage = 'encrypt' | 'decrypt' | 'sign' | 'verify' | 'deriveKey' | 'deriveBits' | 'wrapKey' | 'unwrapKey';
-type AlgorithmIdentifier = string | { name: string; iv?: BufferSource };
 interface CryptoKey {}
+
+export type Algorithm = { name: string; iv: BufferSource };
+export type EncryptionFunction = (algorithm: Algorithm, data: BufferSource, key: CryptoKey) => Promise<ArrayBuffer>;
+export type DecryptionFunction = (algorithm: Algorithm, data: BufferSource, key: CryptoKey) => Promise<ArrayBuffer>;
+export interface InstallOptions {
+    encryptionFunction?: EncryptionFunction,
+    decryptionFunction?: DecryptionFunction
+}
 
 /**
  * Helper: Convert ArrayBuffer or Uint8Array to hex string
@@ -24,17 +30,6 @@ function bufferToHex(buffer: BufferSource): string {
   return Array.from(uint8Array)
     .map((byte: number) => byte.toString(16).padStart(2, '0'))
     .join('');
-}
-
-/**
- * Helper: Convert hex string to ArrayBuffer
- */
-export function hexToBuffer(hex: string): ArrayBuffer {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes.buffer;
 }
 
 /**
@@ -65,17 +60,10 @@ function bufferToBase64(buffer: BufferSource): string {
  * CryptoKey implementation that wraps the key data
  */
 class PolyfillCryptoKey implements CryptoKey {
-  readonly type = 'secret';
-  readonly extractable: boolean;
-  readonly usages: KeyUsage[];
-  readonly algorithm: { name: string };
   readonly keyData: ArrayBuffer;
 
-  constructor(keyData: ArrayBuffer, algorithm: string, extractable: boolean, usages: KeyUsage[]) {
+  constructor(keyData: ArrayBuffer) {
     this.keyData = keyData;
-    this.algorithm = { name: algorithm.toLowerCase() };
-    this.extractable = extractable;
-    this.usages = usages;
   }
 }
 
@@ -85,9 +73,9 @@ class PolyfillCryptoKey implements CryptoKey {
 async function importKey(
   format: string,
   keyData: BufferSource,
-  algorithm: AlgorithmIdentifier,
-  extractable: boolean,
-  keyUsages: KeyUsage[],
+  algorithm: Algorithm | string,
+  // extractable: boolean,
+  // keyUsages: KeyUsage[],
 ): Promise<CryptoKey> {
   if (format !== 'raw') {
     throw new Error(`Unsupported key format: ${format}. Only 'raw' is supported.`);
@@ -103,14 +91,14 @@ async function importKey(
   const keyBuffer =
     keyData instanceof ArrayBuffer ? keyData : ArrayBuffer.isView(keyData) ? keyData.buffer : keyData;
 
-  return new PolyfillCryptoKey(keyBuffer as ArrayBuffer, algorithmName, extractable, keyUsages);
+  return new PolyfillCryptoKey(keyBuffer as ArrayBuffer);
 }
 
 /**
  * Polyfilled crypto.subtle.encrypt implementation
  */
 async function encrypt(
-  algorithm: AlgorithmIdentifier,
+  algorithm: Algorithm | string,
   key: CryptoKey,
   data: BufferSource,
 ): Promise<ArrayBuffer> {
@@ -138,9 +126,9 @@ async function encrypt(
 
   // Determine AES mode based on key length
   const keyLength = new Uint8Array(key.keyData).length * 8;
-  const aesMode = `aes-${keyLength}-cbc` as Aes.Algorithms;
+  const aesMode = `aes-${keyLength}-cbc`;
 
-  const cipherBase64 = await Aes.encrypt(dataBase64, keyHex, ivHex, aesMode);
+  const cipherBase64 = await NativeModules.Aes.encrypt(dataBase64, keyHex, ivHex, aesMode);
 
   return base64ToBuffer(cipherBase64);
 }
@@ -149,7 +137,7 @@ async function encrypt(
  * Polyfilled crypto.subtle.decrypt implementation
  */
 async function decrypt(
-  algorithm: AlgorithmIdentifier,
+  algorithm: Algorithm | string,
   key: CryptoKey,
   data: BufferSource,
 ): Promise<ArrayBuffer> {
@@ -177,42 +165,80 @@ async function decrypt(
 
   // Determine AES mode based on key length
   const keyLength = new Uint8Array(key.keyData).length * 8;
-  const aesMode = `aes-${keyLength}-cbc` as Aes.Algorithms;
 
-  const decryptedBase64 = await Aes.decrypt(dataBase64, keyHex, ivHex, aesMode);
+  const aesMode = `aes-${keyLength}-cbc`;
+
+  const decryptedBase64 = await NativeModules.Aes.decrypt(dataBase64, keyHex, ivHex, aesMode);
 
   return base64ToBuffer(decryptedBase64);
+}
+
+async function buildCustomEncryption(encryptionFunction: EncryptionFunction) {
+    return (
+        algorithm: Algorithm,
+        key: CryptoKey,
+        data: BufferSource,
+    ): Promise<ArrayBuffer> => {
+        if (!(key instanceof PolyfillCryptoKey)) {
+            throw new Error('Invalid CryptoKey');
+        }
+        return encryptionFunction(algorithm, key.keyData, data);
+    }
+}
+
+async function buildCustomDecryption(decryptionFunction: DecryptionFunction) {
+    return (
+        algorithm: Algorithm,
+        key: CryptoKey,
+        data: BufferSource,
+    ): Promise<ArrayBuffer> => {
+        if (!(key instanceof PolyfillCryptoKey)) {
+            throw new Error('Invalid CryptoKey');
+        }
+        return decryptionFunction(algorithm, key.keyData, data);
+    }
 }
 
 /**
  * Initialize all necessary polyfills
  * Call this function at the entry point of your React Native application
  */
-export function install(): void {
-  if (typeof global === 'undefined') {
-    throw new Error('global is not defined. This polyfill must be run in a React Native environment.');
-  }
-
-  const globalAny = global as any;
-
-  // Initialize crypto object (handle cases where crypto is read-only)
-  try {
-    if (!globalAny.crypto) {
-      globalAny.crypto = {};
+export function install(options: InstallOptions = {}): void {
+    if (typeof global === 'undefined') {
+        throw new Error('global is not defined. This polyfill must be run in a React Native environment.');
     }
-  } catch (e) {
-    // crypto might be read-only in some environments (like Node.js)
-    // In this case, we can still modify its properties
-  }
 
-  // Initialize subtle crypto
-  if (!globalAny.crypto.subtle) {
-    globalAny.crypto.subtle = {};
-  }
+    const globalAny = global as any;
 
-  // Install the polyfilled methods
-  globalAny.TextDecoder = globalAny.TextDecoder || TextDecoder;
-  globalAny.crypto.subtle.importKey = importKey;
-  globalAny.crypto.subtle.encrypt = encrypt;
-  globalAny.crypto.subtle.decrypt = decrypt;
+    // Initialize crypto object (handle cases where crypto is read-only)
+    try {
+        if (!globalAny.crypto) {
+            globalAny.crypto = {};
+        }
+    } catch (e) {
+        // crypto might be read-only in some environments (like Node.js)
+        // In this case, we can still modify its properties
+    }
+
+    // Initialize subtle crypto
+    if (!globalAny.crypto.subtle) {
+        globalAny.crypto.subtle = {};
+    }
+
+    // Install the polyfilled methods
+    globalAny.TextDecoder = globalAny.TextDecoder || TextDecoder;
+    globalAny.crypto.subtle.importKey = importKey;
+
+    if (options.encryptionFunction && options.decryptionFunction) {
+        globalAny.crypto.subtle.encrypt = buildCustomEncryption(options.encryptionFunction);
+        globalAny.crypto.subtle.decrypt = buildCustomDecryption(options.decryptionFunction);
+    } else if (options.encryptionFunction || options.decryptionFunction) {
+        throw new Error('Both encryptionFunction and decryptionFunction must be provided to use custom Aes implementation');
+    } else if (NativeModules.Aes) {
+        globalAny.crypto.subtle.encrypt = encrypt;
+        globalAny.crypto.subtle.decrypt = decrypt;
+    } else {
+        throw new Error('No Aes module found. Please ensure @ably/react-native-aes is installed and linked correctly or custom encryption/decryption functions are provided.');
+    }
 }
+
