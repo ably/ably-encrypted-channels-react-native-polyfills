@@ -15,11 +15,11 @@ type BufferSource = ArrayBuffer | ArrayBufferView;
 interface CryptoKey {}
 
 export type Algorithm = { name: string; iv: BufferSource };
-export type EncryptionFunction = (algorithm: Algorithm, data: BufferSource, key: CryptoKey) => Promise<ArrayBuffer>;
-export type DecryptionFunction = (algorithm: Algorithm, data: BufferSource, key: CryptoKey) => Promise<ArrayBuffer>;
+export type EncryptionFunction = (algorithm: Algorithm, key: BufferSource, data: BufferSource) => Promise<ArrayBuffer>;
+export type DecryptionFunction = (algorithm: Algorithm, key: BufferSource, data: BufferSource) => Promise<ArrayBuffer>;
 export interface InstallOptions {
-    encryptionFunction?: EncryptionFunction,
-    decryptionFunction?: DecryptionFunction
+  encryptionFunction?: EncryptionFunction;
+  decryptionFunction?: DecryptionFunction;
 }
 
 /**
@@ -81,15 +81,13 @@ async function importKey(
     throw new Error(`Unsupported key format: ${format}. Only 'raw' is supported.`);
   }
 
-  const algorithmName =
-    typeof algorithm === 'string' ? algorithm.toLowerCase() : algorithm.name.toLowerCase();
+  const algorithmName = typeof algorithm === 'string' ? algorithm.toLowerCase() : algorithm.name.toLowerCase();
 
   if (!algorithmName.includes('aes')) {
     throw new Error(`Unsupported algorithm: ${algorithmName}. Only AES algorithms are supported.`);
   }
 
-  const keyBuffer =
-    keyData instanceof ArrayBuffer ? keyData : ArrayBuffer.isView(keyData) ? keyData.buffer : keyData;
+  const keyBuffer = keyData instanceof ArrayBuffer ? keyData : ArrayBuffer.isView(keyData) ? keyData.buffer : keyData;
 
   return new PolyfillCryptoKey(keyBuffer as ArrayBuffer);
 }
@@ -97,11 +95,7 @@ async function importKey(
 /**
  * Polyfilled crypto.subtle.encrypt implementation
  */
-async function encrypt(
-  algorithm: Algorithm | string,
-  key: CryptoKey,
-  data: BufferSource,
-): Promise<ArrayBuffer> {
+async function encrypt(algorithm: Algorithm | string, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer> {
   if (typeof algorithm === 'string') {
     throw new Error('Algorithm must be an object with name and iv properties');
   }
@@ -130,17 +124,17 @@ async function encrypt(
 
   const cipherBase64 = await NativeModules.Aes.encrypt(dataBase64, keyHex, ivHex, aesMode);
 
-  return base64ToBuffer(cipherBase64);
+  try {
+    return base64ToBuffer(cipherBase64);
+  } catch (e) {
+    throw new Error(`Failed to decode string ${cipherBase64}, because ${e}`);
+  }
 }
 
 /**
  * Polyfilled crypto.subtle.decrypt implementation
  */
-async function decrypt(
-  algorithm: Algorithm | string,
-  key: CryptoKey,
-  data: BufferSource,
-): Promise<ArrayBuffer> {
+async function decrypt(algorithm: Algorithm | string, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer> {
   if (typeof algorithm === 'string') {
     throw new Error('Algorithm must be an object with name and iv properties');
   }
@@ -170,33 +164,29 @@ async function decrypt(
 
   const decryptedBase64 = await NativeModules.Aes.decrypt(dataBase64, keyHex, ivHex, aesMode);
 
-  return base64ToBuffer(decryptedBase64);
+  try {
+    return base64ToBuffer(decryptedBase64);
+  } catch (e) {
+    throw new Error(`Failed to decode string ${decryptedBase64}, because ${e}`);
+  }
 }
 
-async function buildCustomEncryption(encryptionFunction: EncryptionFunction) {
-    return (
-        algorithm: Algorithm,
-        key: CryptoKey,
-        data: BufferSource,
-    ): Promise<ArrayBuffer> => {
-        if (!(key instanceof PolyfillCryptoKey)) {
-            throw new Error('Invalid CryptoKey');
-        }
-        return encryptionFunction(algorithm, key.keyData, data);
+function buildCustomEncryption(encryptionFunction: EncryptionFunction) {
+  return (algorithm: Algorithm, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer> => {
+    if (!(key instanceof PolyfillCryptoKey)) {
+      throw new Error('Invalid CryptoKey');
     }
+    return encryptionFunction(algorithm, key.keyData, data);
+  };
 }
 
-async function buildCustomDecryption(decryptionFunction: DecryptionFunction) {
-    return (
-        algorithm: Algorithm,
-        key: CryptoKey,
-        data: BufferSource,
-    ): Promise<ArrayBuffer> => {
-        if (!(key instanceof PolyfillCryptoKey)) {
-            throw new Error('Invalid CryptoKey');
-        }
-        return decryptionFunction(algorithm, key.keyData, data);
+function buildCustomDecryption(decryptionFunction: DecryptionFunction) {
+  return (algorithm: Algorithm, key: CryptoKey, data: BufferSource): Promise<ArrayBuffer> => {
+    if (!(key instanceof PolyfillCryptoKey)) {
+      throw new Error('Invalid CryptoKey');
     }
+    return decryptionFunction(algorithm, key.keyData, data);
+  };
 }
 
 /**
@@ -204,41 +194,42 @@ async function buildCustomDecryption(decryptionFunction: DecryptionFunction) {
  * Call this function at the entry point of your React Native application
  */
 export function install(options: InstallOptions = {}): void {
-    if (typeof global === 'undefined') {
-        throw new Error('global is not defined. This polyfill must be run in a React Native environment.');
+  if (typeof global === 'undefined') {
+    throw new Error('global is not defined. This polyfill must be run in a React Native environment.');
+  }
+
+  const globalAny = global as any;
+
+  // Initialize crypto object (handle cases where crypto is read-only)
+  try {
+    if (!globalAny.crypto) {
+      globalAny.crypto = {};
     }
+  } catch (e) {
+    // crypto might be read-only in some environments (like Node.js)
+    // In this case, we can still modify its properties
+  }
 
-    const globalAny = global as any;
+  // Initialize subtle crypto
+  if (!globalAny.crypto.subtle) {
+    globalAny.crypto.subtle = {};
+  }
 
-    // Initialize crypto object (handle cases where crypto is read-only)
-    try {
-        if (!globalAny.crypto) {
-            globalAny.crypto = {};
-        }
-    } catch (e) {
-        // crypto might be read-only in some environments (like Node.js)
-        // In this case, we can still modify its properties
-    }
+  // Install the polyfilled methods
+  globalAny.TextDecoder = globalAny.TextDecoder || TextDecoder;
+  globalAny.crypto.subtle.importKey = importKey;
 
-    // Initialize subtle crypto
-    if (!globalAny.crypto.subtle) {
-        globalAny.crypto.subtle = {};
-    }
-
-    // Install the polyfilled methods
-    globalAny.TextDecoder = globalAny.TextDecoder || TextDecoder;
-    globalAny.crypto.subtle.importKey = importKey;
-
-    if (options.encryptionFunction && options.decryptionFunction) {
-        globalAny.crypto.subtle.encrypt = buildCustomEncryption(options.encryptionFunction);
-        globalAny.crypto.subtle.decrypt = buildCustomDecryption(options.decryptionFunction);
-    } else if (options.encryptionFunction || options.decryptionFunction) {
-        throw new Error('Both encryptionFunction and decryptionFunction must be provided to use custom Aes implementation');
-    } else if (NativeModules.Aes) {
-        globalAny.crypto.subtle.encrypt = encrypt;
-        globalAny.crypto.subtle.decrypt = decrypt;
-    } else {
-        throw new Error('No Aes module found. Please ensure @ably/react-native-aes is installed and linked correctly or custom encryption/decryption functions are provided.');
-    }
+  if (options.encryptionFunction && options.decryptionFunction) {
+    globalAny.crypto.subtle.encrypt = buildCustomEncryption(options.encryptionFunction);
+    globalAny.crypto.subtle.decrypt = buildCustomDecryption(options.decryptionFunction);
+  } else if (options.encryptionFunction || options.decryptionFunction) {
+    throw new Error('Both encryptionFunction and decryptionFunction must be provided to use custom Aes implementation');
+  } else if (NativeModules.Aes) {
+    globalAny.crypto.subtle.encrypt = encrypt;
+    globalAny.crypto.subtle.decrypt = decrypt;
+  } else {
+    throw new Error(
+      'No Aes module found. Please ensure @ably/react-native-aes is installed and linked correctly or custom encryption/decryption functions are provided.',
+    );
+  }
 }
-

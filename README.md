@@ -94,10 +94,10 @@ If you don't want to use `@ably/react-native-aes`, you can provide your own encr
 ```typescript
 import { install, type EncryptionFunction, type DecryptionFunction } from '@ably/encrypted-channels-react-native-polyfills';
 
-const customEncrypt: EncryptionFunction = async (algorithm, keyData, data) => {
+const customEncrypt: EncryptionFunction = async (algorithm, key, data) => {
     // Your custom encryption implementation
     // algorithm: { name: string, iv: BufferSource }
-    // keyData: ArrayBuffer - the raw key data
+    // key: BufferSource - the raw key data
     // data: BufferSource - the data to encrypt
     // Returns: Promise<ArrayBuffer> - the encrypted data
 
@@ -112,10 +112,10 @@ const customEncrypt: EncryptionFunction = async (algorithm, keyData, data) => {
     return encrypted;
 };
 
-const customDecrypt: DecryptionFunction = async (algorithm, keyData, data) => {
+const customDecrypt: DecryptionFunction = async (algorithm, key, data) => {
     // Your custom decryption implementation
     // algorithm: { name: string, iv: BufferSource }
-    // keyData: ArrayBuffer - the raw key data
+    // key: BufferSource - the raw key data
     // data: BufferSource - the encrypted data to decrypt
     // Returns: Promise<ArrayBuffer> - the decrypted data
 

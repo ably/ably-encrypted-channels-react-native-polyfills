@@ -53,9 +53,9 @@ describe('Crypto Polyfills', () => {
     it('should throw error for unsupported key format', async () => {
       const keyData = new Uint8Array(32);
 
-      await expect(
-        crypto.subtle.importKey('pkcs8', keyData, 'AES-CBC', false, ['encrypt']),
-      ).rejects.toThrow('Unsupported key format');
+      await expect(crypto.subtle.importKey('pkcs8', keyData, 'AES-CBC', false, ['encrypt'])).rejects.toThrow(
+        'Unsupported key format',
+      );
     });
 
     it('should throw error for non-AES algorithm', async () => {
@@ -86,9 +86,7 @@ describe('Crypto Polyfills', () => {
 
       const key = await crypto.subtle.importKey('raw', keyData, 'AES-CBC', false, ['encrypt']);
 
-      await expect(crypto.subtle.encrypt({ name: 'AES-CBC' } as any, key, plaintext)).rejects.toThrow(
-        'IV is required',
-      );
+      await expect(crypto.subtle.encrypt({ name: 'AES-CBC' } as any, key, plaintext)).rejects.toThrow('IV is required');
     });
   });
 
